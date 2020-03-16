@@ -1,0 +1,9 @@
+{
+  "name": "com.energenie",
+  "version": "0.0.1",
+  "main": "app.js",
+  "devDependencies": {
+    "homey": "^2.2.2"
+  },
+  "dependencies": {}
+}

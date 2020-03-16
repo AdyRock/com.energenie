@@ -1,0 +1,63 @@
+{
+  "id": "com.energenie",
+  "version": "0.0.1",
+  "compatibility": ">=3.0.0",
+  "sdk": 2,
+  "name": {
+    "en": "Energenie"
+  },
+  "description": {
+    "en": "Adds support for Energenie products using the hub"
+  },
+  "category": [
+    "lights"
+  ],
+  "permissions": [],
+  "images": {
+    "large": "/assets/images/large.png",
+    "small": "/assets/images/small.png"
+  },
+  "author": {
+    "name": "Adrian Rockall",
+    "email": "ady@rockall.plus.com"
+  },
+  "drivers": [
+    {
+      "id": "energy",
+      "name": {
+        "en": "Energy"
+      },
+      "class": "sensor",
+      "capabilities": [
+        "measure_power",
+        "meter_power",
+        "measure_battery"
+      ],
+      "energy": {
+        "cumulative": true,
+        "batteries": [
+          "AA",
+          "AA",
+          "AA"
+        ]
+      },
+      "pair": [
+        {
+          "id": "list_devices",
+          "template": "list_devices",
+          "navigation": {
+            "next": "add_devices"
+          }
+        },
+        {
+          "id": "add_devices",
+          "template": "add_devices"
+        }
+      ],
+      "images": {
+        "large": "/drivers/energy/assets/images/large.png",
+        "small": "/drivers/energy/assets/images/small.png"
+      }
+    }
+  ]
+}
