@@ -43,7 +43,7 @@
         <p>Polling</p>
         <fieldset>
             <div class="field row">
-                <label for="pollInterval">Polling Interval (ms)</label>
+                <label for="pollInterval">Polling Interval (seconds)</label>
                 <input id="pollInterval" type="text" value="" />
             </div>
 
@@ -107,6 +107,12 @@
                     if (err) return Homey.alert(err);
                     diagLogElement.value = diagLog;
                 });
+
+                Homey.get('password', function (err, password) {
+                    if (err) return Homey.alert(err);
+                    passwordElement.value = password;
+                });
+
                 Homey.get('apiKey', function (err, apiKey) {
                     if (err) return Homey.alert(err);
                     apiKeyElement.value = apiKey;
@@ -121,6 +127,11 @@
             Homey.get('password', function (err, password) {
                 if (err) return Homey.alert(err);
                 passwordElement.value = password;
+            });
+
+            Homey.get('apiKey', function (err, apiKey) {
+                if (err) return Homey.alert(err);
+                apiKeyElement.value = apiKey;
             });
 
             Homey.get('pollInterval', function (err, pollInterval) {

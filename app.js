@@ -338,11 +338,14 @@ class MyApp extends Homey.App {
 	}
 
 	updateLog(newMessage) {
-//		Homey.app.log(newMessage);
+		//		Homey.app.log(newMessage);
 
 		if (Homey.ManagerSettings.get('logEnabled')) {
 			Homey.app.log(newMessage);
 			var oldText = Homey.ManagerSettings.get('diagLog');
+			if (oldText.length > 5000) {
+				oldText = "";
+			}
 			oldText += "* ";
 			oldText += newMessage;
 			oldText += "\r\n";
