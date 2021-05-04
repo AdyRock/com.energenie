@@ -1,9 +1,13 @@
 {
-  "name": "com.energenie",
-  "version": "0.0.1",
-  "main": "app.js",
-  "devDependencies": {
-    "homey": "^2.2.2"
-  },
-  "dependencies": {}
+    "name": "com.energenie",
+    "version": "0.0.1",
+    "main": "app.js",
+    "devDependencies": {
+        "@types/homey": "npm:homey-apps-sdk-v3-types@^0.1.0",
+        "homey": "^2.18.0"
+    },
+    "dependencies": {
+        "nodemailer": "^6.5.0"
+    },
+    "license": "GPL-3.0"
 }

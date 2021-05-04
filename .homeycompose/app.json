@@ -1,0 +1,62 @@
+{
+    "id": "com.energenie",
+    "version": "0.0.1",
+    "compatibility": ">=5.0.0",
+    "sdk": 3,
+    "brandColor": "#FF7D4B",
+    "name": {
+        "en": "Energenie"
+    },
+    "description": {
+        "en": "Adds support for Energenie products using the hub"
+    },
+    "category": [
+        "energy"
+    ],
+    "permissions": [],
+    "contributing": {
+        "donate": {
+            "paypal": {
+                "username": "adyrock"
+            }
+        }
+    },
+    "bugs": {
+        "url": "https://github.com/AdyRock/com.energenie/issues"
+    },
+    "source": "https://github.com/AdyRock/com.energenie",
+    "homeyCommunityTopicId": 47044,
+    "images": {
+        "large": "/assets/images/large.png",
+        "small": "/assets/images/small.png"
+    },
+    "author": {
+        "name": "Adrian Rockall",
+        "email": "ady@rockall.plus.com"
+    },
+    "api": {
+        "getLog": {
+            "method": "get",
+            "path": "/getLog/"
+        },
+        "getDetected": {
+            "method": "get",
+            "path": "/getDetected/"
+        },
+        "clearLog": {
+            "method": "post",
+            "path": "/clearLog/"
+        },
+        "sendLog": {
+            "method": "post",
+            "path": "/sendLog/"
+        }
+    },
+    "contributors": {
+        "translators": [
+            {
+                "name": "Dirk Göbel"
+            }
+        ]
+    }
+}

@@ -1,357 +1,536 @@
 'use strict';
+if (process.env.DEBUG === '1')
+{
+    require('inspector').open(9222, '0.0.0.0', true);
+}
 
 const Homey = require('homey');
 const https = require("https");
+const nodemailer = require("nodemailer");
+
 const POLL_INTERVAL = 3000;
 
-const CapabilityMap = [{
-		id: "voltage",
-		type: "measure_battery"
-	},
-	{
-		id: "last_data_instant",
-		type: "measure_power"
-	},
-	{
-		id: "target_temperature",
-		type: "target_temperature"
-	},
-	{
-		id: "today_wh",
-		type: "meter_power"
-	},
-]
+const CapabilityMap = [
+{
+    id: "voltage",
+    type: "measure_battery"
+},
+{
+    id: "last_data_instant",
+    type: "measure_power"
+},
+{
+    id: "target_temperature",
+    type: "target_temperature"
+},
+{
+    id: "today_wh",
+    type: "meter_power"
+}, ];
 
-class MyApp extends Homey.App {
+class MyApp extends Homey.App
+{
 
-	async onInit() {
-		this.log('Energenie has started...');
+    async onInit()
+    {
+        this.log('Energenie has started...');
 
-		this.apiKey = Homey.ManagerSettings.get('apiKey');
-		this.userName = Homey.ManagerSettings.get('userName');
-		if (Homey.ManagerSettings.get('pollInterval') < 1) {
-			Homey.ManagerSettings.set('pollInterval', 5);
-		}
+        this.apiKey = this.homey.settings.get('apiKey');
+        this.userName = this.homey.settings.get('userName');
+        if (this.homey.settings.get('pollInterval') < 1)
+        {
+            this.homey.settings.set('pollInterval', 5);
+        }
 
-		this.log("Energenie has started for " + this.userName + " and Key: " + this.apiKey + " or pw: " + Homey.ManagerSettings.get('password') + " Polling every " + Homey.ManagerSettings.get('pollInterval') + " seconds");
+        // Callback for app settings changed
+        this.homey.settings.on('set', async (setting) =>
+        {
+            if (setting != 'diaglog')
+            {
+                this.log("Setting " + setting + " has changed.");
+                if ((setting === 'userName') && (this.userName != this.homey.settings.get('userName')))
+                {
+                    // A new Username has been set
+                    this.userName = this.homey.settings.get('userName');
+                    this.apiKey = "";
+                    this.homey.settings.set('apiKey', "");
+                }
 
-		// Callback for app settings changed
-		Homey.ManagerSettings.on('set', async function (setting) {
-			if (setting != 'diaglog') {
-				Homey.app.log("Setting " + setting + " has changed.");
-				if ((setting === 'userName') && (Homey.app.userName != Homey.ManagerSettings.get('userName'))) {
-					// A new Username has been set
-					Homey.app.userName = Homey.ManagerSettings.get('userName');
-					Homey.app.apiKey = "";
-					Homey.ManagerSettings.set('apiKey', "");
-				}
+                if ((setting === 'userName') || (setting === 'password'))
+                {
+                    if (this.homey.settings.get('userName') && this.homey.settings.get('password'))
+                    {
+                        this.log("Getting API Key for " + this.homey.settings.get('userName') + " and pw: " + this.homey.settings.get('password'));
+                        try
+                        {
+                            await this.GetAPIKey(this.homey.settings.get('userName'), this.homey.settings.get('password'));
+                        }
+                        catch (err)
+                        {
+                            this.log(err);
+                        }
+                    }
+                }
 
-				if ((setting === 'userName') || (setting === 'password')) {
-					if (Homey.ManagerSettings.get('userName') && Homey.ManagerSettings.get('password')) {
-						this.log("Getting API Key for " + Homey.ManagerSettings.get('userName') + " and pw: " + Homey.ManagerSettings.get('password'));
-						try {
-							await Homey.app.GetAPIKey(Homey.ManagerSettings.get('userName'), Homey.ManagerSettings.get('password'));
-						} catch (err) {
-							this.log(err);
-						}
-					}
-				}
+                if (setting === 'pollInterval')
+                {
+                    clearTimeout(this.timerID);
+                    if (this.apiKey && !this.timerProcessing)
+                    {
+                        if (this.homey.settings.get('pollInterval') > 1)
+                        {
+                            this.timerID = setTimeout(this.onPoll, this.homey.settings.get('pollInterval') * 1000);
+                        }
+                    }
+                }
+            }
+        });
 
-				if (setting === 'pollInterval') {
-					clearTimeout(Homey.app.timerID);
-					if (Homey.app.apiKey && !Homey.app.timerProcessing) {
-						if (Homey.ManagerSettings.get('pollInterval') > 1) {
-							Homey.app.timerID = setTimeout(Homey.app.onPoll, Homey.ManagerSettings.get('pollInterval') * 1000);
-						}
-					}
-				}
-			}
-		});
+        if (this.userName && this.homey.settings.get('password'))
+        {
+            this.log("Getting API Key for " + this.userName + " and pw: " + this.homey.settings.get('password'));
+            await this.GetAPIKey(this.userName, this.homey.settings.get('password'));
+        }
 
-		if (this.userName && Homey.ManagerSettings.get('password')) {
-			this.log("Getting API Key for " + this.userName + " and pw: " + Homey.ManagerSettings.get('password'));
-			await Homey.app.GetAPIKey(this.userName, Homey.ManagerSettings.get('password'));
-		}
+        this.onPoll = this.onPoll.bind(this);
 
-		this.onPoll = this.onPoll.bind(this);
+        if (this.apiKey)
+        {
+            if (this.homey.settings.get('pollInterval') > 1)
+            {
+                this.updateLog("Start Polling");
+                this.timerID = setTimeout(this.onPoll, Number(this.homey.settings.get('pollInterval')) * 1000);
+            }
+        }
 
-		if (this.apiKey) {
-			if (Homey.ManagerSettings.get('pollInterval') > 1) {
-				this.updateLog("Start Polling");
-				this.timerID = setTimeout(this.onPoll, Number(Homey.ManagerSettings.get('pollInterval')) * 1000);
-			}
-		}
+        this.updateLog('************** App has initialised. ***************');
+    }
 
-		this.updateLog('************** App has initialised. ***************');
-	}
+    async GetAPIKey(UserName, Password)
+    {
+        //https://mihome4u.co.uk/api/v1/users/profile
+        clearTimeout(this.timerID);
+        const url = "users/profile";
+        let searchResult = await this.GetURL(url, UserName, Password);
+        if (searchResult)
+        {
+            let searchData = JSON.parse(searchResult.body);
+            this.updateLog(JSON.stringify(searchData, null, 2));
+            this.apiKey = searchData.data.api_key;
+            this.homey.settings.set('apiKey', this.apiKey);
+            this.homey.settings.unset('password');
+            this.timerID = setTimeout(this.onPoll, Number(this.homey.settings.get('pollInterval')) * 1000);
+            return this.apiKey;
+        }
+        else
+        {
+            this.updateLog("Getting API Key returned NULL");
+            return null;
+        }
+    }
 
-	async GetAPIKey(UserName, Password) {
-		//https://mihome4u.co.uk/api/v1/users/profile
-		clearTimeout(Homey.app.timerID);
-		const url = "users/profile";
-		let searchResult = await Homey.app.GetURL(url, UserName, Password);
-		if (searchResult) {
-			let searchData = JSON.parse(searchResult.body);
-			Homey.app.updateLog(JSON.stringify(searchData, null, 2));
-			Homey.app.apiKey = searchData.data.api_key;
-			Homey.ManagerSettings.set('apiKey', Homey.app.apiKey);
-			Homey.ManagerSettings.unset('password');
-			Homey.app.timerID = setTimeout(Homey.app.onPoll, Number(Homey.ManagerSettings.get('pollInterval')) * 1000);
-			return Homey.app.apiKey;
-		} else {
-			Homey.app.updateLog("Getting API Key returned NULL");
-			return null;
-		}
-	}
+    async getDevices()
+    {
+        //https://mihome4u.co.uk/api/v1/subdevices/list
+        const url = "subdevices/list";
+        let searchResult = await this.GetURL(url);
+        if (searchResult)
+        {
+            let searchData = JSON.parse(searchResult.body);
+            if (searchData.status === "success")
+            {
+                this.detectedDevices = JSON.stringify(searchData, null, 2);
+                return searchData;
+            }
 
-	async getDevicesOfType(deviceType) {
-		//https://mihome4u.co.uk/api/v1/subdevices/list
-		const url = "subdevices/list";
-		let searchResult = await Homey.app.GetURL(url);
-		if (searchResult) {
-			let searchData = JSON.parse(searchResult.body);
-			Homey.app.updateLog(JSON.stringify(searchData, null, 2));
-			if (searchData.status === "success") {
-				const devices = [];
+            throw new Error(
+            {
+                statusCode: -3,
+                statusMessage: "HTTPS Error: " + searchData.status
+            });
+        }
 
-				// Create an array of devices of the requested type
-				for (const subDevice of searchData['data']) {
-					// Look up the product code to get our type
-					Homey.app.updateLog("Found device: " + subDevice);
+        this.updateLog("Getting Devices returned NULL");
+        throw new Error(
+        {
+            statusCode: -3,
+            statusMessage: "HTTPS Error: Nothing returned"
+        });
+    }
 
-					if (subDevice['device_type'] == deviceType) {
-						var data = {};
-						data = {
-							"id": subDevice['id'],
-						};
+    async getDevicesOfType(deviceType)
+    {
+        let searchData = await this.getDevices();
+        const devices = [];
 
-						// Find supported capabilities
-						var capabilities = [];
-						for (const feature of CapabilityMap) {
-							if (subDevice[feature['id']] != null) {
-								//Add to the table
-								capabilities.push(feature['type']);
-							}
-						}
-						// Add this device to the table
-						devices.push({
-							"name": subDevice['label'],
-							"capabilities": capabilities,
-							data
-						})
-					} else {
-						Homey.app.updateLog("Wrong device type");
-					}
-				}
+        // Create an array of devices of the requested type
+        for (const subDevice of searchData.data)
+        {
+            // Look up the product code to get our type
+            this.updateLog("Found device: " + subDevice);
 
-				return devices;
-			}
+            if (subDevice.device_type == deviceType)
+            {
+                var data = {};
+                data = {
+                    "id": subDevice.id,
+                };
 
-			reject({
-				statusCode: -3,
-				statusMessage: "HTTPS Error: " + searchData.status
-			});
-		} else {
-			Homey.app.updateLog("Getting API Key returned NULL");
-			reject({
-				statusCode: -3,
-				statusMessage: "HTTPS Error: Nothing returned"
-			});
-		}
-	}
+                // Find supported capabilities
+                var capabilities = [];
+                for (const feature of CapabilityMap)
+                {
+                    if (subDevice[feature.id] != null)
+                    {
+                        //Add to the table
+                        capabilities.push(feature.type);
+                    }
+                }
+                // Add this device to the table
+                devices.push(
+                {
+                    "name": subDevice.label,
+                    "capabilities": capabilities,
+                    data
+                });
+            }
+            else
+            {
+                this.updateLog("Wrong device type");
+            }
+        }
 
-	async getFeatureValue(featureId, data_type) {
-		//https://mihome4u.co.uk/api/v1/subdevices/get_data
-		var today = new Date();
-		today.setHours(today.getHours() - 10);
-		let postData = 'params=' + encodeURIComponent(JSON.stringify({
-			"id": featureId,
-			"data_type": data_type,
-			"resolution": "instant",
-			"start_time": JSON.stringify(today),
-			"end_time": JSON.stringify(new Date()),
-			"limit": 1
-		}, null, '+'));
+        return devices;
+    }
 
-		postData = postData.replace(/%2B/g, '');
+    async getFeatureValue(featureId, data_type)
+    {
+        //https://mihome4u.co.uk/api/v1/subdevices/get_data
+        var today = new Date();
+        today.setHours(today.getHours() - 10);
+        let postData = 'params=' + encodeURIComponent(JSON.stringify(
+        {
+            "id": featureId,
+            "data_type": data_type,
+            "resolution": "instant",
+            "start_time": JSON.stringify(today),
+            "end_time": JSON.stringify(new Date()),
+            "limit": 1
+        }, null, '+'));
 
-		var result = await this.GetURL("subdevices/get_data", null, null, postData);
-		if (result) {
-			let searchData = JSON.parse(result.body);
-			Homey.app.updateLog(JSON.stringify(searchData, null, 2));
-			return searchData.data[0][1];
-		}
+        postData = postData.replace(/%2B/g, '');
 
-		return -1;
-	}
+        var result = await this.GetURL("subdevices/get_data", null, null, postData);
+        if (result)
+        {
+            let searchData = JSON.parse(result.body);
+            this.updateLog(JSON.stringify(searchData, null, 2));
+            return searchData.data[0][1];
+        }
 
-	async getFeatureValues(featureId) {
-		//https://mihome4u.co.uk/api/v1/subdevices/show
-		let postData = 'params=' + encodeURIComponent(JSON.stringify({
-			"id": featureId,
-		}, null, '+'));
+        return -1;
+    }
 
-		postData = postData.replace(/%2B/g, '');
+    async getFeatureValues(featureId)
+    {
+        //https://mihome4u.co.uk/api/v1/subdevices/show
+        let postData = 'params=' + encodeURIComponent(JSON.stringify(
+        {
+            "id": featureId,
+        }, null, '+'));
 
-		var result = await this.GetURL("subdevices/show", null, null, postData);
-		if (result) {
-			let searchData = JSON.parse(result.body);
-			Homey.app.updateLog(JSON.stringify(searchData, null, 2));
-			return searchData.data;
-		}
+        postData = postData.replace(/%2B/g, '');
 
-		return -1;
-	}
+        var result = await this.GetURL("subdevices/show", null, null, postData);
+        if (result)
+        {
+            let searchData = JSON.parse(result.body);
+            this.updateLog(JSON.stringify(searchData, null, 2));
+            return searchData.data;
+        }
 
-	async GetURL(url, UserName, Password, postData) {
-		Homey.app.updateLog(url);
+        return -1;
+    }
 
-		return new Promise((resolve, reject) => {
-			try {
-				let bodyData = "";
-				if (postData) {
-					bodyData = postData;
-				}
-				if (!Homey.app.userName && !UserName) {
-					reject({
-						statusCode: 401,
-						statusMessage: "HTTPS: No user account"
-					});
-				}
+    async GetURL(url, UserName, Password, postData)
+    {
+        this.updateLog(url);
 
-				let key = "";
-				if (UserName) {
-					key = UserName;
-				} else {
-					key = Homey.app.userName;
-				}
+        return new Promise((resolve, reject) =>
+        {
+            try
+            {
+                let bodyData = "";
+                if (postData)
+                {
+                    bodyData = postData;
+                }
+                if (!this.userName && !UserName)
+                {
+                    reject(
+                    {
+                        statusCode: 401,
+                        statusMessage: "HTTPS: No user account"
+                    });
+                }
 
-				if (!Homey.app.apiKey && !Password) {
-					reject({
-						statusCode: 401,
-						statusMessage: "HTTPS: No password"
-					});
-				}
-				let secret = "";
-				if (Password) {
-					secret = Password;
-				} else {
-					secret = Homey.app.apiKey;
-				}
+                let key = "";
+                if (UserName)
+                {
+                    key = UserName;
+                }
+                else
+                {
+                    key = this.userName;
+                }
 
-				let https_options = {
-					host: "mihome4u.co.uk",
-					path: "/api/v1/" + url,
-					method: "POST",
-					headers: {
-						"Authorization": "Basic " + new Buffer(key + ":" + secret, "utf8").toString("base64"),
-						"Content-Type": "application/x-www-form-urlencoded",
-						"Content-Length": bodyData.length
-					},
-				}
+                if (!this.apiKey && !Password)
+                {
+                    reject(
+                    {
+                        statusCode: 401,
+                        statusMessage: "HTTPS: No password"
+                    });
+                }
+                let secret = "";
+                if (Password)
+                {
+                    secret = Password;
+                }
+                else
+                {
+                    secret = this.apiKey;
+                }
 
-				Homey.app.updateLog(https_options);
+                let https_options = {
+                    host: "mihome4u.co.uk",
+                    path: "/api/v1/" + url,
+                    method: "POST",
+                    headers:
+                    {
+                        "Authorization": "Basic " + new Buffer.from(key + ":" + secret, "utf8").toString("base64"),
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Content-Length": bodyData.length
+                    },
+                };
 
-				let req = https.request(https_options, (res) => {
-					if (res.statusCode === 200) {
-						let body = [];
-						res.on('data', (chunk) => {
-							Homey.app.updateLog("retrieve data");
-							body.push(chunk);
-						});
-						res.on('end', () => {
-							Homey.app.updateLog("Done retrieval of data");
-							resolve({
-								"body": Buffer.concat(body)
-							});
-						});
-					} else {
-						let message = "";
-						if (res.statusCode === 204) {
-							message = "No Data Found";
-						} else if (res.statusCode === 400) {
-							message = "Bad request";
-						} else if (res.statusCode === 401) {
-							message = "Unauthorized";
-						} else if (res.statusCode === 403) {
-							message = "Forbidden";
-						} else if (res.statusCode === 404) {
-							message = "Not Found";
-						}
-						Homey.app.updateLog("HTTPS Error: " + res.statusCode + ": " + message);
-						reject({
-							statusCode: res.statusCode,
-							statusMessage: "HTTPS Error: " + message
-						});
-					}
-				}).on('error', (err) => {
-					Homey.app.updateLog(err);
-					reject({
-						statusCode: -1,
-						statusMessage: "HTTPS Catch : " + err
-					});
-				});
-				if (bodyData) {
-					Homey.app.updateLog(postData);
-					req.write(postData);
-				}
-				req.end();
-			} catch (err) {
-				Homey.app.updateLog(err);
-				reject({
-					statusCode: -2,
-					statusMessage: "HTTPS Catch: " + err
-				});
-			}
-		});
-	}
+                this.updateLog(https_options);
 
-	async onPoll() {
-		Homey.app.timerProcessing = true;
-		const promises = [];
-		try {
-			// Fetch the list of drivers for this app
-			const drivers = Homey.ManagerDrivers.getDrivers();
-			for (const driver in drivers) {
-				let devices = Homey.ManagerDrivers.getDriver(driver).getDevices();
-				for (var i = 0; i < devices.length; i++) {
-					let device = devices[i];
-					if (device.getDeviceValues) {
-						promises.push(device.getDeviceValues());
-					}
-				}
-			}
+                let req = https.request(https_options, (res) =>
+                {
+                    if (res.statusCode === 200)
+                    {
+                        let body = [];
+                        res.on('data', (chunk) =>
+                        {
+                            this.updateLog("retrieve data");
+                            body.push(chunk);
+                        });
+                        res.on('end', () =>
+                        {
+                            this.updateLog("Done retrieval of data");
+                            resolve(
+                            {
+                                "body": Buffer.concat(body)
+                            });
+                        });
+                    }
+                    else
+                    {
+                        let message = "";
+                        if (res.statusCode === 204)
+                        {
+                            message = "No Data Found";
+                        }
+                        else if (res.statusCode === 400)
+                        {
+                            message = "Bad request";
+                        }
+                        else if (res.statusCode === 401)
+                        {
+                            message = "Unauthorized";
+                        }
+                        else if (res.statusCode === 403)
+                        {
+                            message = "Forbidden";
+                        }
+                        else if (res.statusCode === 404)
+                        {
+                            message = "Not Found";
+                        }
+                        this.updateLog("HTTPS Error: " + res.statusCode + ": " + message);
+                        reject(
+                        {
+                            statusCode: res.statusCode,
+                            statusMessage: "HTTPS Error: " + message
+                        });
+                    }
+                }).on('error', (err) =>
+                {
+                    this.updateLog(err);
+                    reject(
+                    {
+                        statusCode: -1,
+                        statusMessage: "HTTPS Catch : " + err
+                    });
+                });
+                if (bodyData)
+                {
+                    this.updateLog(postData);
+                    req.write(postData);
+                }
+                req.end();
+            }
+            catch (err)
+            {
+                this.updateLog(err);
+                reject(
+                {
+                    statusCode: -2,
+                    statusMessage: "HTTPS Catch: " + err
+                });
+            }
+        });
+    }
 
-			await Promise.all(promises);
+    async onPoll()
+    {
+        this.timerProcessing = true;
+        const promises = [];
+        try
+        {
+            // Fetch the list of drivers for this app
+            const drivers = this.homey.drivers.getDrivers();
+            for (const driver in drivers)
+            {
+                let devices = this.homey.drivers.getDriver(driver).getDevices();
+                for (var i = 0; i < devices.length; i++)
+                {
+                    let device = devices[i];
+                    if (device.getDeviceValues)
+                    {
+                        promises.push(device.getDeviceValues());
+                    }
+                }
+            }
 
-		} catch (err) {
-			Homey.app.updateLog("Polling Error: " + err);
-		}
+            await Promise.all(promises);
 
-		var nextInterval = Number(Homey.ManagerSettings.get('pollInterval')) * 1000;
-		if (nextInterval < 1000) {
-			nextInterval = 5000;
-		}
-		Homey.app.updateLog("Next Interval = " + nextInterval, true);
-		Homey.app.timerID = setTimeout(Homey.app.onPoll, nextInterval);
-		Homey.app.timerProcessing = false;
-	}
+        }
+        catch (err)
+        {
+            this.updateLog("Polling Error: " + err);
+        }
 
-	updateLog(newMessage) {
-		//		Homey.app.log(newMessage);
+        var nextInterval = Number(this.homey.settings.get('pollInterval')) * 1000;
+        if (nextInterval < 1000)
+        {
+            nextInterval = 5000;
+        }
+        this.updateLog("Next Interval = " + nextInterval, true);
+        this.timerID = setTimeout(this.onPoll, nextInterval);
+        this.timerProcessing = false;
+    }
 
-		if (Homey.ManagerSettings.get('logEnabled')) {
-			Homey.app.log(newMessage);
-			var oldText = Homey.ManagerSettings.get('diagLog');
-			if (oldText.length > 5000) {
-				oldText = "";
-			}
-			oldText += "* ";
-			oldText += newMessage;
-			oldText += "\r\n";
-			Homey.ManagerSettings.set('diagLog', oldText);
-		}
-	}
+    updateLog(newMessage, errorLevel = 1)
+    {
+        if ((errorLevel == 0) || this.homey.settings.get('logEnabled'))
+        {
+            console.log(newMessage);
+
+            const nowTime = new Date(Date.now());
+
+            this.diagLog += "\r\n* ";
+            this.diagLog += (nowTime.getHours());
+            this.diagLog += ":";
+            this.diagLog += nowTime.getMinutes();
+            this.diagLog += ":";
+            this.diagLog += nowTime.getSeconds();
+            this.diagLog += ".";
+            let milliSeconds = nowTime.getMilliseconds().toString();
+            if (milliSeconds.length == 2)
+            {
+                this.diagLog += '0';
+            }
+            else if (milliSeconds.length == 1)
+            {
+                this.diagLog += '00';
+            }
+            this.diagLog += milliSeconds;
+            this.diagLog += ": ";
+            this.diagLog += "\r\n";
+
+            this.diagLog += newMessage;
+            this.diagLog += "\r\n";
+            if (this.diagLog.length > 60000)
+            {
+                this.diagLog = this.diagLog.substr(this.diagLog.length - 60000);
+            }
+            this.homey.api.realtime('com.energenie.logupdated', { 'log': this.diagLog });
+        }
+    }
+
+    async sendLog(body)
+    {
+        let tries = 5;
+
+        let logData;
+        if (body.logType == "diag")
+        {
+            logData = this.diagLog;
+        }
+        else
+        {
+            logData = this.detectedDevices;
+        }
+
+        while (tries-- > 0)
+        {
+            try
+            {
+                // create reusable transporter object using the default SMTP transport
+                let transporter = nodemailer.createTransport(
+                {
+                    host: Homey.env.MAIL_HOST, //Homey.env.MAIL_HOST,
+                    port: 465,
+                    ignoreTLS: false,
+                    secure: true, // true for 465, false for other ports
+                    auth:
+                    {
+                        user: Homey.env.MAIL_USER, // generated ethereal user
+                        pass: Homey.env.MAIL_SECRET // generated ethereal password
+                    },
+                    tls:
+                    {
+                        // do not fail on invalid certs
+                        rejectUnauthorized: false
+                    }
+                });
+
+                // send mail with defined transport object
+                let info = await transporter.sendMail(
+                {
+                    from: '"Homey User" <' + Homey.env.MAIL_USER + '>', // sender address
+                    to: Homey.env.MAIL_RECIPIENT, // list of receivers
+                    subject: "Energenie " + body.logType + " log", // Subject line
+                    text: logData // plain text body
+                });
+
+                this.updateLog("Message sent: " + info.messageId);
+                // Message sent: <b658f8ca-6296-ccf4-8306-87d57a0b4321@example.com>
+
+                // Preview only available when sending through an Ethereal account
+                console.log("Preview URL: ", nodemailer.getTestMessageUrl(info));
+                return this.homey.__('settings.logSent');
+            }
+            catch (err)
+            {
+                this.updateLog("Send log error: " + err.stack, 0);
+            }
+        }
+
+        return (this.homey.__('settings.logSendFailed'));
+    }
 }
 
 module.exports = MyApp;
